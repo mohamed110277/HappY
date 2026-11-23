@@ -119,7 +119,7 @@ const im=new Image();im.onload=()=>{const c=document.createElement("canvas");c.w
 $("#th").onclick=()=>{const r=document.documentElement,n=r.dataset.theme=="light"?"dark":"light";r.dataset.theme=n;LS.set("bosta_theme",n)};
 // ---------- storage (shared db + this device)
 async function load(){
- DAYS=IS_ADMIN?LS.get("bosta_v2_days",{}):{};Object.keys(DAYS).forEach(k=>PERSIST.add(k));STARS=LS.get("bosta_v2_stars",null);const c=LS.get("bosta_v2_cfg",null);if(c){if(c.v===2)Object.assign(CFG.tg,c.tg||{});Object.assign(CFG.sd,c.sd||{})}
+ DAYS=IS_ADMIN?LS.get("bosta_v2_days",{}):{};STARS=LS.get("bosta_v2_stars",null);const c=LS.get("bosta_v2_cfg",null);if(c){if(c.v===2)Object.assign(CFG.tg,c.tg||{});Object.assign(CFG.sd,c.sd||{})}
  try{DB=await tmo(claude.use("db"),9000)}catch(e){DB=null}
  if(DB){try{const q=await tmo(DB.collection("days").get());q.docs.forEach(d=>{const v=d.data();if(v&&v.d){DAYS[v.d]=v;PERSIST.add(v.d)}});
    const c2=await tmo(DB.doc("cfg/hubs").get());if(c2.exists){const v=c2.data();if(v.v===2)Object.assign(CFG.tg,v.tg||{});Object.assign(CFG.sd,v.sd||{})}
@@ -127,7 +127,7 @@ async function load(){
   }catch(e){}}
  if(!STARS)STARS=SEED_STARS;if(!DAYS[SEED_DAY.d])DAYS[SEED_DAY.d]=SEED_DAY;
  const ks=Object.keys(DAYS).sort().reverse();cur=ks[0];SENT=LS.get("bosta_v2_sent",{})}
-async function dbSet(path,obj){if(!DB||!DBW)return false;try{await tmo(DB.doc(path).set(obj));return true}catch(e){DBW=false;return false}}
+let DBERR="";async function dbSet(path,obj){if(!DB||!DBW)return false;for(let i=0;i<3;i++){try{await tmo(DB.doc(path).set(obj),90000);DBERR="";return true}catch(e){DBERR=e.message||String(e)}}DBW=false;return false}
 async function persistAll(){LS.set("bosta_v2_days",DAYS);LS.set("bosta_v2_cfg",CFG);
  const ks=Object.keys(DAYS).sort().reverse().slice(0,40);for(const k of ks)if(!PERSIST.has(k)){if(await dbSet("days/"+k,DAYS[k]))PERSIST.add(k)}
  return DBW&&!!DB}
@@ -261,7 +261,7 @@ function buildDay(att,names){const hd=att[0].map(x=>String(x).trim().toLowerCase
  const lo=new Date(new Date(top+"T00:00:00Z")-30*864e5).toISOString().slice(0,10),nw=STARS.m.filter(s=>s[6]&&s[6]>=lo&&s[6]<=top).map(s=>{const c=rec.get(s[0])||{d:0,k:0,r:0};return[s[0],s[1],s[2],s[3],s[7]||"Unknown",s[4],s[5],s[6],c.d+c.k+c.r,c.d,c.k]});
  return{d:top,nw,dates:ds,built:new Date().toLocaleString("en-GB"),at:names.at,st:names.st,n,m:mine,un:un.size,du:dups,noid,hubs,abs}}
 function renderUp(msgTxt,err){const d=day()||SEED_DAY,c=t=>`<span>${t}</span>`;
- const chips=`<div class="chk">${c("Day shown: <b>"+d.d+"</b>")}${c("Attempts file: <b>"+d.at+"</b> ("+f(d.n)+" rows)")}${c("In your "+HUBS.length+" hubs: <b>"+f(d.m)+"</b> shipments")}${c("Stars list: <b>"+d.st+"</b> ("+f(STARS?STARS.m.length:0)+" stars in your hubs)")}${d.un?c(f(d.un)+" stars delivered but are not in the Stars file"):""}${d.du?c(f(d.du)+" duplicate tracking IDs"):""}${c(DB&&DBW?"Saved for everyone (shared)":"Saved on this device only")}${c(f(Object.keys(DAYS).length)+" days stored")}</div>`;
+ const chips=`<div class="chk">${c("Day shown: <b>"+d.d+"</b>")}${c("Attempts file: <b>"+d.at+"</b> ("+f(d.n)+" rows)")}${c("In your "+HUBS.length+" hubs: <b>"+f(d.m)+"</b> shipments")}${c("Stars list: <b>"+d.st+"</b> ("+f(STARS?STARS.m.length:0)+" stars in your hubs)")}${d.un?c(f(d.un)+" stars delivered but are not in the Stars file"):""}${d.du?c(f(d.du)+" duplicate tracking IDs"):""}${c(DB&&DBW?"Saved for everyone (shared)":"Saved on this device only"+(DBERR?" - error: "+DBERR:""))}${c(f(Object.keys(DAYS).length)+" days stored")}</div>`;
  $("#up").innerHTML=`<div class="card drop" id="dz"><div class="top"><div><b style="font-size:18px">Daily update</b><div class="sub">Drop the <b>Stars export</b> and the <b>Attempts export</b> here, or choose them. Each day is kept, so you can switch between today, yesterday and older days. The Stars file can be skipped if it did not change. A <b>Targets</b> Excel (Hub, Target, Standard) can be dropped here too.</div></div><span><label class="btn p" for="fi">Choose files</label></span></div><input id="fi" type="file" accept=".xlsx,.xls,.csv" multiple hidden>${msgTxt?`<div class="${err?"err":"ok2"}">${msgTxt}</div>`:""}${chips}</div>`}
 async function handle(files){files=[...files];if(!files.length)return;if(!window.XLSX){renderUp("The Excel reader could not load. Check your internet connection and reload.",1);return}
  let att=null,stars=null,tgf=null,nm={at:"",st:""};
@@ -284,7 +284,7 @@ $("#up").addEventListener("change",e=>{if(e.target.id=="fi"){handle(e.target.fil
 // ---------- main
 function render(){datesBar();tabsBar();scopeBar();$("#app").innerHTML=view=="rep"?repView():view=="new"?newView():absView()}
 if(!IS_ADMIN){const s=document.createElement("style");s.textContent="#up{display:none!important}";document.head.appendChild(s)}
-(async()=>{DAYS[SEED_DAY.d]=SEED_DAY;STARS=SEED_STARS;cur=SEED_DAY.d;renderUp();render();await load();renderUp();render();
+(async()=>{DAYS[SEED_DAY.d]=SEED_DAY;STARS=SEED_STARS;cur=SEED_DAY.d;renderUp();render();await load();renderUp();render();if(DB){let pushed=false;const sm=await DB.doc("stars/meta").get();if(!sm.exists&&STARS&&STARS!==SEED_STARS){renderUp("Sharing stars list with the team ...");await persistStars();pushed=true}if(Object.keys(DAYS).some(k=>!PERSIST.has(k))){renderUp("Sharing saved days with the team ...");await persistAll();pushed=true}if(pushed)renderUp(DBW?"Your saved days are now shared with the team.":"Could not share: "+DBERR,!DBW)}
  setInterval(async()=>{const keep=cur;try{const D=await claude.use("db");const q=await D.collection("days").get();let ch=false;q.docs.forEach(d=>{const v=d.data();if(v&&v.d&&(!DAYS[v.d]||DAYS[v.d].built!==v.built)){DAYS[v.d]=v;ch=true}});
   const c2=await D.doc("cfg/hubs").get();if(c2.exists){Object.assign(CFG.tg,c2.data().tg||{});Object.assign(CFG.sd,c2.data().sd||{})}
   const m=await D.doc("stars/meta").get();if(m.exists){const L=[];for(let i=0;i<m.data().mc;i++){const x=await D.doc("stars/m"+i).get();if(x.exists)L.push(...x.data().list)}const o=await D.doc("stars/o").get();STARS={m:L,o:o.exists?o.data().list:[]}}
